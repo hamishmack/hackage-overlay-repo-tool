@@ -129,6 +129,7 @@ mkOverlay config = do
                       unlessM (test_f patchFn) $
                           errorExit ("patch file not found " <> T.pack (show patchFn))
 
+                      run_ "dos2unix" [toTextIgnore (pn <.> "cabal")]
                       run_ "patch" ["-i", toTextIgnore patchFn, "-p1", "--no-backup-if-mismatch"]
 
                   run_ (_tar_cmd config)  [ "-cvz", "--format=ustar", "--numeric-owner", "--owner=root", "--group=root"
