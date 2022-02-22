@@ -74,6 +74,7 @@ mkOverlay config = do
   idxDir   <- absPath "repo.tmp/index"
   patchDir <- absPath (_patches config)
   patchCacheDir <- absPath $ (_patches config) <.> "cache"
+  repoCacheDir <- absPath $ _remote_repo_cache config
 
   pfns <- ls (_patches config) >>= mapM (relativeTo (_patches config))
 
@@ -92,17 +93,17 @@ mkOverlay config = do
       , "  secure: True"
       , ""
       , "http-transport: plain-http"
-      , "remote-repo-cache: " <> toTextIgnore (_remote_repo_cache config)
+      , "remote-repo-cache: " <> toTextIgnore repoCacheDir
       ]
     run_ "cabal"  ["--config-file=" <> toTextIgnore cfgFile, "update"]
     forM_ (Set.toList $ cabalFns0 <> patchFns) $ \pkg ->
       run_ "cabal" ["--config-file=" <> toTextIgnore cfgFile, "fetch", "--no-dependencies", pid2txt pkg]
 
 
-  let get_pkgcache :: PkgId -> Sh FilePath
-      get_pkgcache (PkgId pn pv) = absPath $ (_remote_repo_cache config) </> (_remote_repo_name config) </> pn </> pv </> (pn <> "-" <> pv) <.> "tar.gz"
+    let get_pkgcache :: PkgId -> Sh FilePath
+        get_pkgcache (PkgId pn pv) = absPath $ (_remote_repo_cache config) </> (_remote_repo_name config) </> pn </> pv </> (pn <> "-" <> pv) <.> "tar.gz"
 
-  forM_ patchFns $ \pid@(PkgId pn pv) -> do
+    forM_ patchFns $ \pid@(PkgId pn pv) -> do
       pkg <- get_pkgcache pid
       withTmpDir $ \tmpdir -> do
           let p       = pid2txt pid
@@ -119,7 +120,7 @@ mkOverlay config = do
           if not cacheHit
             then -- cache MISS
               chdir tmpdir $ do
-                  run_ (_tar_cmd config) [ "-xf", toTextIgnore pkg ]
+                  run_ "cabal" ["--config-file=" <> toTextIgnore cfgFile, "get", p]
 
                   chdir (fromText p) $ do
                       unlessM (test_f (pn <.> "cabal")) $
@@ -143,15 +144,15 @@ mkOverlay config = do
             else -- cache HIT
               cp tarCacheFn pkgDir
 
-  forM_ cabalFns $ \pid@(PkgId pn pv) -> do
+    forM_ cabalFns $ \pid@(PkgId pn pv) -> do
       pkg <- get_pkgcache pid
       cp pkg pkgDir
 
-  run_ "hackage-repo-tool" ["bootstrap", "--keys", toTextIgnore (_keys config), "--repo", "repo.tmp/", "--verbose"]
+    run_ "hackage-repo-tool" ["bootstrap", "--keys", toTextIgnore (_keys config), "--repo", "repo.tmp/", "--verbose"]
 
-  sleep 2
+    sleep 2
 
-  forM_ cabalFns0 $ \pid@(PkgId pn pv) -> do
+    forM_ cabalFns0 $ \pid@(PkgId pn pv) -> do
       withTmpDir $ \tmpdir -> do
           chdir tmpdir $ do
               let p = pid2txt pid
@@ -159,14 +160,14 @@ mkOverlay config = do
 
               cp cabalFn (idxDir </> pn </> pv </> (pn <.> "cabal"))
 
-  run_ "hackage-repo-tool" ["update", "--keys", toTextIgnore (_keys config), "--repo", "repo.tmp/", "--verbose"]
+    run_ "hackage-repo-tool" ["update", "--keys", toTextIgnore (_keys config), "--repo", "repo.tmp/", "--verbose"]
 
-  rm_f "repo.tmp/01-index.tar"
-  rm_rf "repo.tmp/index"
+    rm_f "repo.tmp/01-index.tar"
+    rm_rf "repo.tmp/index"
 
-  if "s3://" `T.isPrefixOf` (_target config)
-    then run_ "aws" ["s3", "sync", "repo.tmp/", (_target config)]
-    else run_ "rsync" ["--delete", "-cvrz", "-e", "ssh", "repo.tmp/", (_target config)]
+    if "s3://" `T.isPrefixOf` (_target config)
+      then run_ "aws" ["s3", "sync", "repo.tmp/", (_target config)]
+      else run_ "rsync" ["--delete", "-cvrz", "-e", "ssh", "repo.tmp/", (_target config)]
 
   return ()
 
